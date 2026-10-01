@@ -33,15 +33,15 @@ if "roster" not in st.session_state:
     ])
 
 st.title("🎭 Unlimited Character Voice Studio")
-st.markdown("Create custom characters, preview voices, and generate your conversation. **Host for free!**")
+st.markdown("Create custom characters, preview voices, and generate your conversation.")
 
 col1, col2 = st.columns([1, 1.5])
 
 with col1:
     st.subheader("👥 Character Roster")
-    st.markdown("Edit directly in the table below to add/remove characters:")
+    st.markdown("Your active characters:")
     
-    # Editable table!
+    # Editable table
     st.session_state.roster = st.data_editor(
         st.session_state.roster, 
         num_rows="dynamic",
@@ -49,19 +49,47 @@ with col1:
     )
     
     st.divider()
-    st.subheader("🔊 Preview a Voice")
-    preview_voice = st.selectbox("Select Voice to Preview", AVAILABLE_VOICES)
-    preview_speed = st.slider("Speech Speed (%)", -50, 50, 0)
+    st.subheader("📝 Assign a Voice")
     
-    if st.button("Preview"):
-        with st.spinner("Generating preview..."):
-            rate_str = f"{int(preview_speed):+d}%"
-            temp_file = f"preview_{uuid.uuid4().hex}.mp3"
-            asyncio.run(generate_line("Hello! This is a preview of my voice at this speed.", preview_voice, rate_str, temp_file))
-            st.audio(temp_file)
+    # The new easy-assign form
+    char_input = st.text_input("1. Character Name", placeholder="e.g. AI Core, Doctor Vance")
+    voice_select = st.selectbox("2. Select Voice", AVAILABLE_VOICES)
+    speed_select = st.slider("3. Speech Speed (%)", -50, 50, 0)
+    
+    col_btn1, col_btn2 = st.columns(2)
+    
+    with col_btn1:
+        if st.button("🔊 Preview Voice", use_container_width=True):
+            with st.spinner("Loading preview..."):
+                rate_str = f"{int(speed_select):+d}%"
+                temp_file = f"preview_{uuid.uuid4().hex}.mp3"
+                asyncio.run(generate_line("Hello! This is a preview of my voice at this speed.", voice_select, rate_str, temp_file))
+                st.audio(temp_file)
+                
+    with col_btn2:
+        if st.button("➕ Add / Update", type="primary", use_container_width=True):
+            if char_input.strip():
+                df = st.session_state.roster
+                char_lower = char_input.strip().lower()
+                mask = df["Character Name"].str.strip().str.lower() == char_lower
+                
+                # Update existing character or add new one
+                if mask.any():
+                    df.loc[mask, "Assigned Voice"] = voice_select
+                    df.loc[mask, "Speed Rate (%)"] = speed_select
+                    st.success(f"Updated {char_input}!")
+                else:
+                    new_row = pd.DataFrame([{"Character Name": char_input.strip(), "Assigned Voice": voice_select, "Speed Rate (%)": speed_select}])
+                    df = pd.concat([df, new_row], ignore_index=True)
+                    st.success(f"Added {char_input}!")
+                    
+                st.session_state.roster = df
+                st.rerun() # Refreshes the page to show the new table
+            else:
+                st.error("Please enter a character name first!")
 
     st.divider()
-    fallback_voice = st.selectbox("Default / Fallback Voice", AVAILABLE_VOICES, index=0)
+    fallback_voice = st.selectbox("Default / Fallback Voice", AVAILABLE_VOICES, index=0, help="Used if a character in your script isn't in the roster.")
 
 with col2:
     st.subheader("🎬 The Script")
@@ -80,7 +108,14 @@ Narrator: The console beeped loudly."""
             for _, row in st.session_state.roster.iterrows():
                 name = str(row["Character Name"]).strip().lower()
                 voice_map[name] = str(row["Assigned Voice"])
-                rate_map[name] = f"{int(row['Speed Rate (%)']):+d}%"
+                
+                # --- THE FIX: Safety net for empty speed values ---
+                try:
+                    speed_val = int(row['Speed Rate (%)'])
+                except (ValueError, TypeError):
+                    speed_val = 0  # Default to 0 if the cell is empty/broken
+                rate_map[name] = f"{speed_val:+d}%"
+                # --------------------------------------------------
             
             lines = script_text.split('\n')
             combined_audio = AudioSegment.empty()
